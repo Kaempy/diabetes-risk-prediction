@@ -513,6 +513,7 @@ MODELS_DIR.mkdir(exist_ok=True)
 joblib.dump(final_model, MODELS_DIR / "final_model.joblib")
 joblib.dump(uncalibrated, MODELS_DIR / "best_pipeline_uncalibrated.joblib")
 joblib.dump(fitted[("Logistic Regression", "unweighted")], MODELS_DIR / "logistic_regression.joblib")
+joblib.dump(nolab_model, MODELS_DIR / "no_lab_model.joblib")
 
 summary = {
     "best_model": f"{best_name} ({best_strategy}) + isotonic calibration",
@@ -520,6 +521,7 @@ summary = {
     "risk_cutoffs": list(CUTOFFS),
     "test_metrics": {k: (round(float(v), 4) if isinstance(v, float) else v) for k, v in test_metrics.items()},
     "test_metrics_no_lab": {k: round(float(v), 4) for k, v in ablation["without lab values"].items()},
+    "no_lab_features": nolab_features,
     "risk_groups_test": risk_table.round(4).reset_index().astype({"group": str}).to_dict(orient="records"),
 }
 (REPORTS_DIR / "metrics.json").write_text(json.dumps(summary, indent=2))

@@ -29,6 +29,15 @@
     "specificity": 0.587,
     "precision": 0.173
   },
+  "no_lab_features": [
+    "age",
+    "bmi",
+    "age_bmi",
+    "hypertension",
+    "heart_disease",
+    "gender",
+    "smoking_history"
+  ],
   "risk_groups_test": [
     {
       "group": "Low",
