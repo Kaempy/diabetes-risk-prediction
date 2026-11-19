@@ -4,6 +4,8 @@ An end-to-end machine learning project that estimates the **probability that a p
 
 The project goes beyond a single accuracy number: it compares models and class-imbalance strategies on a held-out validation set, calibrates the probabilities, picks a clinically motivated decision threshold, evaluates **once** on an untouched test set, explains predictions with **SHAP**, checks performance across **patient subgroups**, and runs an ablation that asks how well risk can be estimated **without blood tests**.
 
+Finally, the models are **externally validated on real patients from NHANES 2021–2023 (CDC)**. That test shows how much of the Kaggle performance survives in real-world data, and exposes a synthetic-data artefact that a single-dataset evaluation would have hidden.
+
 > Portfolio project, developed from a She Code Africa Data Science capstone (Group 1) and extended into a reproducible, tested ML workflow.
 
 ---
@@ -14,7 +16,8 @@ The project goes beyond a single accuracy number: it compares models and class-i
 - [Visual Results](#visual-results)
 - [Explainability](#explainability)
 - [Subgroup Analysis](#subgroup-analysis)
-- [Dataset](#dataset)
+- [External Validation on NHANES](#external-validation-on-nhanes)
+- [Datasets](#datasets)
 - [Methodology](#methodology)
 - [Key Insight: Label Leakage from Lab Values](#key-insight-label-leakage-from-lab-values)
 - [Repository Structure](#repository-structure)
@@ -61,6 +64,16 @@ For reference, a model that always predicts the prevalence has PR-AUC 0.088 and 
 | **Without HbA1c & glucose** |   0.827 |  0.308 |       89.3% |       58.7% |
 
 Using only age, BMI, hypertension, heart disease, gender and smoking history, the model still discriminates well above chance (ROC-AUC 0.83). It could work as a cheap **pre-screen** to decide who should get a blood test.
+
+### External validation on real patients (NHANES)
+
+| Model (trained on Kaggle, applied unchanged) | Kaggle test ROC-AUC | NHANES ROC-AUC (diagnosed) | NHANES ROC-AUC (total, ADA) |
+| -------------------------------------------- | ------------------: | -------------------------: | --------------------------: |
+| Full model                                   |               0.977 |                      0.858 |                       0.891 |
+| Lab-free model                               |               0.827 |                      0.775 |                       0.778 |
+| _HbA1c alone (benchmark)_                    |                   – |                  **0.929** |                   **0.940** |
+
+On real patients, **HbA1c alone beats the Kaggle-trained model**, because the model learned a rule that exists only in the synthetic data. The lab-free model transfers best. See [External Validation](#external-validation-on-nhanes).
 
 ---
 
@@ -128,9 +141,54 @@ Group-specific thresholds or external validation would be needed before any real
 
 ---
 
-## Dataset
+## External Validation on NHANES
 
-[Diabetes Prediction Dataset](https://www.kaggle.com/datasets/iammustafatz/diabetes-prediction-dataset) (Kaggle): 100,000 patient records, 8 predictors plus a binary `diabetes` label. See [`data/README.md`](data/README.md) for the column dictionary and download steps.
+The Kaggle dataset's origins are unclear, so the trained models were tested on **NHANES 2021–2023** ([notebook 05](notebooks/05_external_validation_nhanes.ipynb)). NHANES is the CDC's nationally representative survey, and it **measures HbA1c and fasting glucose**. The models were applied exactly as trained, with the same thresholds and risk cut-offs.
+
+- **Cohorts:** 3,158 adults with HbA1c and fasting glucose, for the full model. 5,943 adults with complete non-lab data, for the lab-free model.
+- **Outcomes:** two definitions.
+  - **Diagnosed:** self-reported doctor diagnosis. This doesn't depend on the lab values, which makes it the honest test.
+  - **Total (ADA):** diagnosed, or HbA1c ≥ 6.5%, or fasting glucose ≥ 126 mg/dL.
+
+| Full model at Kaggle threshold | Kaggle test | NHANES diagnosed | NHANES total (ADA) |
+| ------------------------------ | ----------: | ---------------: | -----------------: |
+| ROC-AUC                        |       0.977 |            0.858 |              0.891 |
+| ROC-AUC (survey-weighted)      |           – |            0.880 |              0.906 |
+| PR-AUC                         |       0.880 |            0.641 |              0.819 |
+| Sensitivity                    |       87.7% |            73.6% |              73.7% |
+| Specificity                    |       92.7% |            94.0% |              98.7% |
+
+![External validation ROC and PR curves](reports/figures/external_full_model_roc_pr.png)
+
+### The glucose-126 artefact
+
+In the Kaggle data, **not one diabetic patient has glucose below 126 mg/dL**, so the model learned "glucose < 126 ⇒ not diabetic" as a hard rule. Real patients don't follow it:
+
+| NHANES diagnosed diabetics | Patients | Median HbA1c | Median predicted risk | Sensitivity |
+| -------------------------- | -------: | -----------: | --------------------: | ----------: |
+| Fasting glucose < 126      |      157 |         6.2% |                    0% |       34.4% |
+| Fasting glucose ≥ 126      |      278 |         7.6% |                  100% |       95.7% |
+
+That is the long flat stretch in the ROC curve above: about a fifth of the real diabetics get a predicted risk of exactly 0.
+
+### What this means
+
+1. **A 0.98 AUC on one dataset can be misleading.** On real patients the model is still good (AUC 0.86–0.89), but it is **worse than HbA1c alone (0.93)**.
+2. **Calibration doesn't transfer either.** Mean predicted risk is 12% against an observed 19%, so the model would need recalibrating locally before any use.
+3. **The lab-free model generalises best** (AUC 0.83 → 0.78). It relies on genuine risk factors (age, BMI, hypertension, heart disease), not synthetic cut-offs.
+4. **Next step:** train on real data (pooled NHANES cycles) instead of the Kaggle data.
+
+![HbA1c and glucose distributions, Kaggle vs NHANES](reports/figures/external_lab_distributions.png)
+
+---
+
+## Datasets
+
+**Training and internal testing:** [Diabetes Prediction Dataset](https://www.kaggle.com/datasets/iammustafatz/diabetes-prediction-dataset) (Kaggle). 100,000 patient records, 8 predictors and a binary `diabetes` label.
+
+**External validation:** [NHANES 2021–2023](https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?Cycle=2021-2023) (CDC / NCHS, public domain). The files are downloaded automatically by notebook 05.
+
+See [`data/README.md`](data/README.md) for column dictionaries, the variable mapping and download steps.
 
 | Group          | Features                                       |
 | -------------- | ---------------------------------------------- |
@@ -168,6 +226,7 @@ raw CSV ─► clean ─► engineer features ─► stratified split (70 / 15 /
    - Made a three-way stratified split.
    - Built leakage-safe preprocessing: outlier caps, scaling and SMOTE are all fitted on training data only, inside the pipeline.
 3. **Modelling** ([03](notebooks/03_model_development.ipynb)):
+
    | | Unweighted | Class-weighted | SMOTE |
    |---|---|---|---|
    | Logistic Regression | ✓ | ✓ | ✓ |
@@ -177,6 +236,7 @@ raw CSV ─► clean ─► engineer features ─► stratified split (70 / 15 /
    Each combination is compared with a prior-only baseline. The best model is then calibrated, its threshold is tuned, it is tested once, and the no-lab ablation is run.
 
 4. **Explainability** ([04](notebooks/04_explainability.ipynb)): logistic regression odds ratios, permutation importance, SHAP (global, dependence, waterfall) and subgroup metrics.
+5. **External validation** ([05](notebooks/05_external_validation_nhanes.ipynb)): the NHANES data are mapped onto the Kaggle columns. Both trained models are then applied unchanged, alongside lab-only benchmarks, survey-weighted AUCs and an analysis of the glucose artefact.
 
 ### Validation model comparison (default 0.5 threshold)
 
@@ -201,7 +261,8 @@ Class weighting and SMOTE change ranking quality very little. Their main effect 
 | Accuracy-led comparison at a 0.5 threshold                  | PR-AUC, Brier score, calibration and a clinically chosen threshold |
 | LR vs RF                                                    | LR, RF and Gradient Boosting × 3 imbalance strategies + baseline   |
 | Feature importance only                                     | SHAP (global and local), permutation importance, subgroup analysis |
-| Single notebook                                             | Modular `src/` package, 4 notebooks, unit tests, CI                |
+| Evaluated on one dataset only                               | External validation on real NHANES patients                        |
+| Single notebook                                             | Modular `src/` package, 5 notebooks, unit tests, CI                |
 
 ---
 
@@ -214,6 +275,8 @@ EDA shows the label is **partly determined by the lab values**:
 
 These cut-offs are essentially the clinical diagnostic criteria. Part of the model's very high ROC-AUC therefore comes from **re-learning the diagnostic rule**, not from predicting future disease. I report this openly and quantify it with the lab-free ablation above, rather than presenting 0.98 AUC as a headline without context.
 
+The [NHANES external validation](#external-validation-on-nhanes) confirms this: on real patients, the rule the model learned from these cut-offs costs it accuracy.
+
 ---
 
 ## Repository Structure
@@ -221,13 +284,15 @@ These cut-offs are essentially the clinical diagnostic criteria. Part of the mod
 ```
 diabetes-risk-prediction/
 ├── data/
-│   ├── README.md               # dataset source, download steps, column dictionary
-│   └── raw/                    # place diabetes_prediction_dataset.csv here (git-ignored)
+│   ├── README.md               # dataset sources, download steps, column dictionaries
+│   ├── raw/                    # place diabetes_prediction_dataset.csv here (git-ignored)
+│   └── external/nhanes/        # NHANES files, downloaded by notebook 05 (git-ignored)
 ├── notebooks/
 │   ├── 01_data_exploration.ipynb
 │   ├── 02_data_preparation.ipynb
 │   ├── 03_model_development.ipynb
 │   ├── 04_explainability.ipynb
+│   ├── 05_external_validation_nhanes.ipynb
 │   └── _build_notebooks.py     # regenerates the notebooks from source
 ├── src/
 │   ├── config.py               # paths and constants
@@ -235,11 +300,13 @@ diabetes-risk-prediction/
 │   ├── preprocessing.py        # IQRCapper + ColumnTransformer
 │   ├── modeling.py             # models, imbalance strategies, calibration, thresholds
 │   ├── evaluation.py           # metrics, risk groups, plots
-│   └── explainability.py       # odds ratios, permutation importance, SHAP
+│   ├── explainability.py       # odds ratios, permutation importance, SHAP
+│   └── nhanes.py               # NHANES download, harmonisation, cohorts
 ├── tests/                      # pytest unit tests (synthetic data, no download needed)
 ├── reports/
 │   ├── figures/                # all figures used in this README
 │   ├── metrics.json            # final test metrics and risk-group table
+│   ├── metrics_nhanes.json     # external validation results
 │   └── validation_model_comparison.csv
 ├── .github/workflows/tests.yml # CI: runs the test suite on every push
 ├── requirements.txt
@@ -253,23 +320,31 @@ diabetes-risk-prediction/
 Requires Python 3.11 or later.
 
 ```bash
-git clone https://github.com/<your-username>/diabetes-risk-prediction.git
+git clone https://github.com/kaempy/diabetes-risk-prediction.git
 cd diabetes-risk-prediction
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-1. Download the dataset into `data/raw/` (see [`data/README.md`](data/README.md)).
-2. Run the notebooks in order (`01` → `04`). Notebook 03 saves the trained models to `models/` and the metrics to `reports/`. Notebook 04 loads those models.
+1. Download the Kaggle dataset into `data/raw/` (see [`data/README.md`](data/README.md)).
+2. Run the notebooks in order (`01` → `05`).
+   - Notebook 03 saves the trained models to `models/` and the metrics to `reports/`.
+   - Notebooks 04 and 05 load those models.
+   - Notebook 05 downloads the NHANES files (about 10 MB) the first time it runs.
 
    To run them all headlessly:
 
-3. Run the tests:
    ```bash
-    pytest
+   cd notebooks && jupyter nbconvert --to notebook --execute --inplace 0*.ipynb
    ```
 
-The full pipeline takes about 3 minutes on a laptop. All randomness is seeded (`random_state=42`), and results reproduce exactly with `requirements-lock.txt`.
+3. Run the tests:
+
+   ```bash
+   pytest
+   ```
+
+The full pipeline takes about 4 minutes on a laptop. All randomness is seeded (`random_state=42`), and results reproduce exactly with `requirements-lock.txt`.
 
 ---
 
@@ -279,11 +354,12 @@ The full pipeline takes about 3 minutes on a laptop. All randomness is seeded (`
 - **Diagnostic leakage.** HbA1c and glucose overlap with the definition of the label (see above).
 - **Cross-sectional data.** The model estimates _current_ diabetes status, not future onset.
 - **Small subgroups.** Under-18s have about 10 test cases, and the `gender = Other` group was removed.
-- **No external validation.** All results come from one dataset.
+- **Transfer to real data.** On NHANES, the full model falls behind HbA1c alone, and its probabilities are mis-calibrated (see [External Validation](#external-validation-on-nhanes)).
+- **Validation shortcuts.** NHANES glucose is fasting, while the Kaggle measure is probably random. The survey-weighted AUCs are point estimates without design-based confidence intervals.
 
 ## Future Work
 
-- Validate on an independent dataset, such as BRFSS or NHANES.
+- Retrain on real data (pooled NHANES cycles), using survey weights and including treatment status.
 - Build a dedicated **lab-free model** with richer lifestyle and family-history features.
 - Tune hyperparameters with nested cross-validation.
 - Use decision-curve analysis to choose the threshold by net clinical benefit.
@@ -295,7 +371,10 @@ The full pipeline takes about 3 minutes on a laptop. All randomness is seeded (`
 
 This project began as the **She Code Africa Data Science capstone (Group 1)**. The original team carried out the initial data cleaning, EDA, feature engineering, and the logistic regression and random forest models. This repository restructures and extends that work.
 
-Dataset: Mohammed Mustafa, _Diabetes Prediction Dataset_, Kaggle.
+Datasets:
+
+- Mohammed Mustafa, _Diabetes Prediction Dataset_, Kaggle.
+- Centers for Disease Control and Prevention, National Center for Health Statistics. _National Health and Nutrition Examination Survey 2021–2023_. U.S. Department of Health and Human Services.
 
 ---
 
