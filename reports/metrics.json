@@ -1,0 +1,55 @@
+{
+  "best_model": "Gradient Boosting (class-weighted) + isotonic calibration",
+  "screening_threshold": 0.1278,
+  "risk_cutoffs": [
+    0.02,
+    0.2
+  ],
+  "test_metrics": {
+    "roc_auc": 0.9771,
+    "pr_auc": 0.8799,
+    "brier": 0.0235,
+    "threshold": 0.1278,
+    "sensitivity": 0.8774,
+    "specificity": 0.9274,
+    "precision": 0.5389,
+    "f1": 0.6677,
+    "balanced_accuracy": 0.9024,
+    "tp": 1116,
+    "fp": 955,
+    "fn": 156,
+    "tn": 12193
+  },
+  "test_metrics_no_lab": {
+    "roc_auc": 0.827,
+    "pr_auc": 0.3077,
+    "brier": 0.0694,
+    "threshold": 0.0527,
+    "sensitivity": 0.8931,
+    "specificity": 0.587,
+    "precision": 0.173
+  },
+  "risk_groups_test": [
+    {
+      "group": "Low",
+      "individuals": 10376,
+      "observed_diabetes": 0.0014,
+      "mean_predicted_risk": 0.0019,
+      "share_of_all_cases": 0.0118
+    },
+    {
+      "group": "Moderate",
+      "individuals": 2603,
+      "observed_diabetes": 0.0953,
+      "mean_predicted_risk": 0.0893,
+      "share_of_all_cases": 0.195
+    },
+    {
+      "group": "High",
+      "individuals": 1441,
+      "observed_diabetes": 0.7002,
+      "mean_predicted_risk": 0.7214,
+      "share_of_all_cases": 0.7932
+    }
+  ]
+}
