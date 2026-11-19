@@ -21,6 +21,8 @@ __pycache__/
 # Data (download instructions in data/README.md)
 data/raw/*
 !data/raw/.gitkeep
+data/external/*
+!data/external/.gitkeep
 
 # Trained model artefacts (regenerate with notebook 03)
 models/
