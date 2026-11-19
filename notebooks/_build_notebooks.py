@@ -966,6 +966,35 @@ The probabilities **do not transfer**. The model's mean predicted risk is 12% ag
 
 The **ordering** of the groups is preserved (Low < Moderate < High), but the absolute probabilities and cut-offs would need recalibrating on local data before any use.
 
+"""),
+    md("""
+### Decision curve analysis on NHANES
+
+Is the Kaggle-trained model still **clinically useful** on real patients, despite the lower AUC and poor calibration? Here the honest outcome (self-reported diagnosis) is used. The total (ADA) outcome is skipped, because it contains the HbA1c ≥ 6.5% rule by definition.
+"""),
+    code("""
+from src.evaluation import decision_curve, plot_decision_curve
+
+p_lab_nolab = no_lab_model.predict_proba(lab[NOLAB_FEATURES])[:, 1]
+dca_nhanes = decision_curve(lab["diabetes_diagnosed"], {
+    "Full model (Kaggle-trained)": p_lab,
+    "Lab-free model": p_lab_nolab,
+    "HbA1c ≥ 6.5% rule": (lab["HbA1c_level"] >= 6.5).to_numpy(),
+})
+fig = plot_decision_curve(dca_nhanes, "Decision curve — NHANES (diagnosed diabetes)", mark=THR_LAB)
+save_fig(fig, FIGURES_DIR / "external_decision_curve.png")
+dca_nhanes.to_csv(REPORTS_DIR / "decision_curve_nhanes.csv")
+dca_nhanes.loc[[0.02, 0.05, 0.10, 0.13, 0.20, 0.30]].round(4)
+"""),
+    md("""
+**Reading the curve**
+
+* **From about 5% to 17% threshold probability**, the full model gives the most net benefit, but only just more than the HbA1c rule (0.093 vs 0.091 at the screening threshold). On real patients the model adds little beyond the HbA1c test.
+* **Above about 17%**, the HbA1c rule wins.
+* **Below about 5%**, the **lab-free model and treat-all** beat the full model. The diabetics with fasting glucose < 126 that the full model scores at 0% are the ones lost here. When a missed case is far costlier than a test, the full model's artefact is a real disadvantage.
+
+So in a realistic setting the full model is **useful, but not clearly better than the HbA1c test alone**. On Kaggle it looked twice as good. This confirms the AUC findings in decision-making terms.
+
 ## 5. Lab-free model (the screening question)
 
 The lab-free model needs only age, BMI, gender, hypertension, heart disease and smoking. It answers *"who should be sent for a blood test?"*, so it is evaluated on all adults with those fields.
@@ -1007,6 +1036,7 @@ external = {
     "no_lab_model": nolab_results.drop(columns="Kaggle test (reference)").round(4).to_dict(),
     "sensitivity_by_treatment_diagnosed": treat["sensitivity"].round(4).to_dict(),
     "auc_benchmarks": benchmarks.round(4).to_dict(),
+    "net_benefit_diagnosed": dca_nhanes.loc[[0.05, 0.10, 0.13, 0.20]].round(4).to_dict(),
 }
 (REPORTS_DIR / "metrics_nhanes.json").write_text(json.dumps(external, indent=2, default=float))
 pd.DataFrame({
