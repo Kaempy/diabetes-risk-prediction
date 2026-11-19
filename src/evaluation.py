@@ -150,3 +150,57 @@ def save_fig(fig, path, dpi: int = 150):
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     return path
+
+
+# ----------------------------------------------------------------------------- decision curve analysis
+
+def net_benefit(y_true, y_pred, threshold: float) -> float:
+    """Net benefit of acting on binary decisions ``y_pred`` at threshold probability ``threshold``.
+
+    NB = TP/n - FP/n * (pt / (1 - pt))  (Vickers & Elkin, 2006). The threshold
+    probability expresses how many false positives one true positive is worth.
+    """
+    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred).astype(bool)
+    n = len(y_true)
+    tp = np.sum(y_pred & (y_true == 1))
+    fp = np.sum(y_pred & (y_true == 0))
+    return tp / n - fp / n * threshold / (1 - threshold)
+
+
+def decision_curve(y_true, strategies: dict, thresholds=None) -> pd.DataFrame:
+    """Net benefit across threshold probabilities.
+
+    ``strategies`` maps a name to either predicted probabilities (classified at each
+    threshold) or a fixed boolean rule (e.g. ``HbA1c >= 6.5``) whose decisions do not
+    depend on the threshold. "Treat all" and "treat none" are added automatically.
+    """
+    thresholds = np.arange(0.01, 0.51, 0.01) if thresholds is None else np.asarray(thresholds)
+    y_true = np.asarray(y_true)
+    rows = []
+    for t in thresholds:
+        row = {"threshold": t,
+               "Treat all": net_benefit(y_true, np.ones_like(y_true), t),
+               "Treat none": 0.0}
+        for name, values in strategies.items():
+            values = np.asarray(values)
+            decisions = values if values.dtype == bool else values >= t
+            row[name] = net_benefit(y_true, decisions, t)
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("threshold")
+
+
+def plot_decision_curve(curve: pd.DataFrame, title: str = "Decision curve analysis",
+                        mark: float | None = None, ax=None):
+    """Plot net benefit curves; the y-axis is clipped just below zero for readability."""
+    fig, ax = plt.subplots(figsize=(8, 5)) if ax is None else (ax.figure, ax)
+    styles = {"Treat all": dict(color="grey", lw=1), "Treat none": dict(color="black", lw=1, ls="--")}
+    for col in curve.columns:
+        ax.plot(curve.index, curve[col], label=col, **styles.get(col, dict(lw=2)))
+    if mark is not None:
+        ax.axvline(mark, color="black", ls=":", lw=1, label=f"Screening threshold ({mark:.2f})")
+    top = curve.drop(columns=["Treat none"]).to_numpy().max()
+    ax.set(xlabel="Threshold probability", ylabel="Net benefit", title=title,
+           ylim=(-0.02, top * 1.1), xlim=(curve.index.min(), curve.index.max()))
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    return fig
