@@ -100,6 +100,17 @@ The default 0.5 threshold misses about a third of diabetic patients. Lowering it
 ![Threshold trade-off](reports/figures/validation_threshold_tradeoff.png)
 ![Confusion matrices](reports/figures/test_confusion_matrices.png)
 
+### Decision curve analysis
+
+ROC-AUC measures how well the model ranks patients. Decision curve analysis (Vickers & Elkin, 2006) asks a different question: does acting on the model lead to **better decisions** than the alternatives? For each threshold probability p<sub>t</sub>, it computes the **net benefit**: true positives found, minus false positives weighted by how many unnecessary tests one case is worth.
+
+![Decision curve, Kaggle test set](reports/figures/test_decision_curve.png)
+
+- **On the Kaggle test set, the model gives the most net benefit at every threshold** from 1% to 50%.
+- At the screening threshold (≈ 13%) its net benefit is **0.068**, about double the simple "HbA1c ≥ 6.5%" rule (0.033).
+- The lab-free model beats testing everyone at every threshold, and beats the HbA1c rule below about 12%.
+- The [NHANES decision curve](#external-validation-on-nhanes) tells a more modest story.
+
 ---
 
 ## Explainability
@@ -180,6 +191,23 @@ That is the long flat stretch in the ROC curve above: about a fifth of the real 
 
 ![HbA1c and glucose distributions, Kaggle vs NHANES](reports/figures/external_lab_distributions.png)
 
+### Decision curve on NHANES
+
+Is the model still useful for real decisions? This uses the honest outcome, self-reported diagnosis.
+
+![Decision curve, NHANES](reports/figures/external_decision_curve.png)
+
+| Net benefit at threshold probability | 5%    | 10%   | 13% (screening) | 20%   |
+| ------------------------------------ | ----- | ----- | --------------- | ----- |
+| Full model (Kaggle-trained)          | 0.100 | 0.097 | 0.093           | 0.087 |
+| HbA1c ≥ 6.5% rule                    | 0.094 | 0.092 | 0.091           | 0.088 |
+| Lab-free model                       | 0.099 | 0.071 | 0.058           | 0.032 |
+| Test everyone                        | 0.092 | 0.042 | 0.009           | < 0   |
+
+- **From about 5% to 17%**, the model gives the most net benefit, but **only just more than the HbA1c test alone**. On Kaggle it was twice as good.
+- **Above about 17%**, the HbA1c rule wins.
+- **Below about 5%**, when a missed case matters far more than an extra test, the lab-free model and "test everyone" do better. The glucose-126 artefact costs the full model the cases it scores at 0%.
+
 ---
 
 ## Datasets
@@ -215,7 +243,8 @@ raw CSV ─► clean ─► engineer features ─► stratified split (70 / 15 /
             ├─► compare 3 models × 3 imbalance strategies on VALIDATION (PR-AUC)
             ├─► isotonic calibration (5-fold CV on train)
             ├─► threshold for ≥ 90% sensitivity on VALIDATION
-            └─► single final evaluation on TEST ─► risk groups, SHAP, subgroups
+            ├─► single final evaluation on TEST ─► risk groups, decision curves, SHAP, subgroups
+            └─► external validation on NHANES 2021–2023 (models applied unchanged)
 ```
 
 1. **Exploration** ([01](notebooks/01_data_exploration.ipynb)): data quality, class imbalance, risk-factor profiles, correlations.
@@ -225,18 +254,9 @@ raw CSV ─► clean ─► engineer features ─► stratified split (70 / 15 /
    - Engineered the interaction features.
    - Made a three-way stratified split.
    - Built leakage-safe preprocessing: outlier caps, scaling and SMOTE are all fitted on training data only, inside the pipeline.
-3. **Modelling** ([03](notebooks/03_model_development.ipynb)):
-
-   | | Unweighted | Class-weighted | SMOTE |
-   |---|---|---|---|
-   | Logistic Regression | ✓ | ✓ | ✓ |
-   | Random Forest | ✓ | ✓ | ✓ |
-   | Gradient Boosting | ✓ | ✓ | ✓ |
-
-   Each combination is compared with a prior-only baseline. The best model is then calibrated, its threshold is tuned, it is tested once, and the no-lab ablation is run.
-
+3. **Modelling** ([03](notebooks/03_model_development.ipynb)): three models (Logistic Regression, Random Forest and Gradient Boosting), each trained three ways (unweighted, class-weighted and SMOTE), plus a prior-only baseline. The best model is calibrated, its threshold is tuned, it is tested once, and then the decision curve and no-lab ablation are run.
 4. **Explainability** ([04](notebooks/04_explainability.ipynb)): logistic regression odds ratios, permutation importance, SHAP (global, dependence, waterfall) and subgroup metrics.
-5. **External validation** ([05](notebooks/05_external_validation_nhanes.ipynb)): the NHANES data are mapped onto the Kaggle columns. Both trained models are then applied unchanged, alongside lab-only benchmarks, survey-weighted AUCs and an analysis of the glucose artefact.
+5. **External validation** ([05](notebooks/05_external_validation_nhanes.ipynb)): the NHANES data are mapped onto the Kaggle columns. Both trained models are then applied unchanged, alongside lab-only benchmarks, survey-weighted AUCs, an analysis of the glucose artefact and a decision curve.
 
 ### Validation model comparison (default 0.5 threshold)
 
@@ -258,7 +278,7 @@ Class weighting and SMOTE change ranking quality very little. Their main effect 
 | ----------------------------------------------------------- | ------------------------------------------------------------------ |
 | Single train/test split; the test set informed model choice | Train / validation / test; the test set is used once               |
 | SMOTE applied manually before fitting                       | SMOTE inside an `imblearn` pipeline (no leakage)                   |
-| Accuracy-led comparison at a 0.5 threshold                  | PR-AUC, Brier score, calibration and a clinically chosen threshold |
+| Accuracy-led comparison at a 0.5 threshold                  | PR-AUC, Brier score, calibration, a clinically chosen threshold and decision curve analysis |
 | LR vs RF                                                    | LR, RF and Gradient Boosting × 3 imbalance strategies + baseline   |
 | Feature importance only                                     | SHAP (global and local), permutation importance, subgroup analysis |
 | Evaluated on one dataset only                               | External validation on real NHANES patients                        |
@@ -307,6 +327,7 @@ diabetes-risk-prediction/
 │   ├── figures/                # all figures used in this README
 │   ├── metrics.json            # final test metrics and risk-group table
 │   ├── metrics_nhanes.json     # external validation results
+│   ├── decision_curve_*.csv    # net benefit by threshold (Kaggle test, NHANES)
 │   └── validation_model_comparison.csv
 ├── .github/workflows/tests.yml # CI: runs the test suite on every push
 ├── requirements.txt
@@ -326,23 +347,23 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-1. Download the Kaggle dataset into `data/raw/` (see [`data/README.md`](data/README.md)).
-2. Run the notebooks in order (`01` → `05`).
-   - Notebook 03 saves the trained models to `models/` and the metrics to `reports/`.
-   - Notebooks 04 and 05 load those models.
-   - Notebook 05 downloads the NHANES files (about 10 MB) the first time it runs.
+Download the Kaggle dataset into `data/raw/` (see [`data/README.md`](data/README.md)). Then run the notebooks in order, `01` → `05`:
 
-   To run them all headlessly:
+- Notebook 03 saves the trained models to `models/` and the metrics to `reports/`.
+- Notebooks 04 and 05 load those models.
+- Notebook 05 downloads the NHANES files (about 10 MB) the first time it runs.
 
-   ```bash
-   cd notebooks && jupyter nbconvert --to notebook --execute --inplace 0*.ipynb
-   ```
+To run all the notebooks headlessly:
 
-3. Run the tests:
+```bash
+cd notebooks && jupyter nbconvert --to notebook --execute --inplace 0*.ipynb
+```
 
-   ```bash
-   pytest
-   ```
+To run the tests:
+
+```bash
+pytest
+```
 
 The full pipeline takes about 4 minutes on a laptop. All randomness is seeded (`random_state=42`), and results reproduce exactly with `requirements-lock.txt`.
 
@@ -362,7 +383,6 @@ The full pipeline takes about 4 minutes on a laptop. All randomness is seeded (`
 - Retrain on real data (pooled NHANES cycles), using survey weights and including treatment status.
 - Build a dedicated **lab-free model** with richer lifestyle and family-history features.
 - Tune hyperparameters with nested cross-validation.
-- Use decision-curve analysis to choose the threshold by net clinical benefit.
 - Serve the model behind a small API or Streamlit app with per-patient SHAP explanations.
 
 ---
