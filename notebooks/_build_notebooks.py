@@ -705,3 +705,294 @@ These patterns suggest group-specific thresholds or additional features may be n
 3. Performance is broadly consistent across subgroups, with known gaps in younger and leaner patients.
 """),
 ])
+
+# =============================================================================
+# 05 — External validation on NHANES
+# =============================================================================
+write("05_external_validation_nhanes.ipynb", [
+    md("""
+# 05 · External Validation on NHANES 2021–2023
+
+Every result so far comes from one Kaggle dataset with unclear provenance, where the label partly follows the lab values. This notebook asks the question that matters for real use: **do the models still work on real, independently collected patients?**
+
+**Validation data:** [NHANES 2021–2023](https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?Cycle=2021-2023) (CDC / NCHS). It is a nationally representative US survey that **measures HbA1c and fasting plasma glucose** and asks whether a doctor has diagnosed diabetes. The models are applied **exactly as trained on Kaggle**: no refitting, same thresholds, same risk cut-offs.
+
+**Two outcome definitions**
+
+| Outcome | Definition | Why |
+|---|---|---|
+| `diabetes_diagnosed` | "Has a doctor ever told you that you have diabetes?" = yes | Independent of the lab values, so there is no circularity |
+| `diabetes_total` | Diagnosed **or** HbA1c ≥ 6.5% **or** fasting glucose ≥ 126 mg/dL | ADA definition (diagnosed + undiagnosed), closest to how the Kaggle label behaves |
+"""),
+    code(SETUP),
+    code("""
+import json
+import joblib
+from sklearn.metrics import roc_auc_score
+
+from src.data_preparation import prepare_dataset, add_engineered_features, MODEL_FEATURES
+from src.evaluation import compute_metrics, risk_group_table, plot_roc_pr, plot_calibration
+from src.nhanes import download_nhanes, load_nhanes_raw, harmonise_nhanes, build_cohorts
+
+download_nhanes()                      # skips files that are already present
+nhanes = harmonise_nhanes(load_nhanes_raw())
+cohorts = build_cohorts(nhanes)
+lab = add_engineered_features(cohorts["lab"])
+no_lab = add_engineered_features(cohorts["no_lab"])
+
+final_model = joblib.load(MODELS_DIR / "final_model.joblib")
+no_lab_model = joblib.load(MODELS_DIR / "no_lab_model.joblib")
+summary = json.loads((REPORTS_DIR / "metrics.json").read_text())
+THR_LAB = summary["screening_threshold"]
+THR_NOLAB = summary["test_metrics_no_lab"]["threshold"]
+NOLAB_FEATURES = summary["no_lab_features"]
+CUTOFFS = tuple(summary["risk_cutoffs"])
+print(f"Thresholds from Kaggle validation: full model {THR_LAB:.3f}, lab-free model {THR_NOLAB:.3f}")
+"""),
+    md("""
+## 1. Harmonisation and cohorts
+
+| Kaggle column | NHANES source |
+|---|---|
+| `gender` | `RIAGENDR` |
+| `age` | `RIDAGEYR` (top-coded at 80, like Kaggle) |
+| `hypertension` | `BPQ020` ever told high blood pressure |
+| `heart_disease` | `MCQ160B/C/E` heart failure, coronary heart disease or heart attack |
+| `smoking_history` | `SMQ020` / `SMQ040` → never / former / current |
+| `bmi` | `BMXBMI` |
+| `HbA1c_level` | `LBXGH` |
+| `blood_glucose_level` | `LBXGLU` fasting plasma glucose (morning fasting subsample only) |
+
+Only adults (≥ 18) are included. Missing values are not imputed; each model is evaluated on the complete cases it needs.
+"""),
+    code("""
+flow = pd.DataFrame({
+    "adults": [len(nhanes), nhanes["diabetes_diagnosed"].mean(), nhanes["diabetes_total"].mean()],
+    "lab-free cohort (complete non-lab features)": [len(no_lab), no_lab["diabetes_diagnosed"].mean(), no_lab["diabetes_total"].mean()],
+    "lab cohort (+ HbA1c & fasting glucose)": [len(lab), lab["diabetes_diagnosed"].mean(), lab["diabetes_total"].mean()],
+}, index=["n", "diagnosed prevalence", "total prevalence"]).T
+flow["n"] = flow["n"].astype(int)
+flow
+"""),
+    md("## 2. How different are the populations?"),
+    code("""
+kaggle = prepare_dataset()
+kaggle_adults = kaggle[kaggle.age >= 18]
+
+def profile(d, label):
+    return pd.Series({
+        "diabetes prevalence": d[label].mean(),
+        "median age": d["age"].median(),
+        "median BMI": d["bmi"].median(),
+        "median HbA1c": d["HbA1c_level"].median(),
+        "median glucose": d["blood_glucose_level"].median(),
+        "hypertension": d["hypertension"].mean(),
+        "heart disease": d["heart_disease"].mean(),
+        "current smoker": (d["smoking_history"] == "current").mean(),
+        "smoking 'no info'": (d["smoking_history"] == "no info").mean(),
+        "distinct HbA1c values": d["HbA1c_level"].nunique(),
+    })
+
+pd.DataFrame({
+    "Kaggle (adults)": profile(kaggle_adults, TARGET),
+    "NHANES lab cohort": profile(lab, "diabetes_total"),
+}).round(3)
+"""),
+    code("""
+fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
+for ax, col, rng in zip(axes, ["HbA1c_level", "blood_glucose_level"], [(3.5, 10), (60, 300)]):
+    bins = np.linspace(*rng, 50)
+    ax.hist(kaggle_adults[col], bins=bins, density=True, alpha=0.55, label="Kaggle")
+    ax.hist(lab[col].clip(*rng), bins=bins, density=True, alpha=0.55, label="NHANES")
+    ax.set(title=f"{col}: Kaggle vs NHANES", xlabel=col, ylabel="Density")
+    ax.legend()
+fig.tight_layout()
+save_fig(fig, FIGURES_DIR / "external_lab_distributions.png");
+"""),
+    md("""
+* NHANES lab values are **continuous**. Kaggle's take only a handful of discrete levels, which fits the suspicion that the Kaggle data are synthetic or heavily rounded.
+* NHANES adults are **older and heavier**, and report **much more hypertension**. Diabetes is about twice as common.
+* NHANES glucose is **fasting**. The Kaggle glucose readings run higher and are probably random (non-fasting) measurements, so the glucose feature means something slightly different in the two datasets.
+
+Shifts like these are exactly what external validation is meant to stress-test.
+
+## 3. Full model (with lab values)
+"""),
+    code("""
+p_lab = final_model.predict_proba(lab[MODEL_FEATURES])[:, 1]
+
+def evaluate(y, p, thr, w=None):
+    m = compute_metrics(y, p, thr)
+    m["roc_auc_weighted"] = roc_auc_score(y, p, sample_weight=w) if w is not None else np.nan
+    m["mean_predicted"] = float(np.mean(p))
+    m["observed_prevalence"] = float(np.mean(y))
+    return m
+
+KEYS = ["roc_auc", "roc_auc_weighted", "pr_auc", "brier", "sensitivity", "specificity",
+        "precision", "observed_prevalence", "mean_predicted"]
+kaggle_test = pd.Series(summary["test_metrics"])
+lab_results = pd.DataFrame({
+    "Kaggle test (reference)": kaggle_test,
+    "NHANES: diagnosed": evaluate(lab["diabetes_diagnosed"], p_lab, THR_LAB, lab["weight_fasting"]),
+    "NHANES: total (ADA)": evaluate(lab["diabetes_total"], p_lab, THR_LAB, lab["weight_fasting"]),
+}).reindex(KEYS)
+lab_results
+"""),
+    code("""
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+from sklearn.metrics import roc_curve, precision_recall_curve, average_precision_score
+for label, color in [("diabetes_diagnosed", "#4C72B0"), ("diabetes_total", "#DD8452")]:
+    y = lab[label]
+    fpr, tpr, _ = roc_curve(y, p_lab)
+    axes[0].plot(fpr, tpr, color=color, label=f"{label} (AUC={roc_auc_score(y, p_lab):.3f})")
+    prec, rec, _ = precision_recall_curve(y, p_lab)
+    axes[1].plot(rec, prec, color=color, label=f"{label} (AP={average_precision_score(y, p_lab):.3f})")
+    axes[1].axhline(y.mean(), color=color, ls=":", lw=1)
+axes[0].plot([0, 1], [0, 1], "--", color="grey", lw=1)
+axes[0].set(xlabel="False positive rate", ylabel="Sensitivity", title="ROC — full model on NHANES")
+axes[1].set(xlabel="Recall", ylabel="Precision", title="Precision-recall — full model on NHANES")
+for a in axes:
+    a.legend(loc="lower right" if a is axes[0] else "upper right", fontsize=9)
+fig.tight_layout()
+save_fig(fig, FIGURES_DIR / "external_full_model_roc_pr.png");
+"""),
+    md("""
+**Reading the results**
+
+* Discrimination drops from 0.977 on Kaggle to **0.89 for total (ADA) diabetes** and **0.86 for self-reported diagnosis**. Survey-weighted AUCs are slightly higher.
+* At the Kaggle threshold, sensitivity falls from 88% to **74%**, while specificity and precision stay high.
+
+So why does a model that looked near-perfect on Kaggle lose ground on real patients?
+
+### The glucose-126 artefact
+In the Kaggle data, **not a single diabetic patient has glucose below 126 mg/dL**. The model therefore learned "glucose < 126 ⇒ not diabetic" as a hard rule. Real patients don't follow it: many people with diabetes have fasting glucose below 126, especially when it is treated or diagnosed through HbA1c.
+"""),
+    code("""
+print("Kaggle diabetics with glucose < 126:",
+      int(((kaggle[TARGET] == 1) & (kaggle["blood_glucose_level"] < 126)).sum()))
+
+lab_scored = lab.assign(p=p_lab, glucose_band=np.where(lab["blood_glucose_level"] >= 126, "glucose >= 126", "glucose < 126"))
+pd.concat({
+    outcome: lab_scored[lab_scored[outcome] == 1].groupby("glucose_band").agg(
+        cases=("p", "size"),
+        median_HbA1c=("HbA1c_level", "median"),
+        median_predicted_risk=("p", "median"),
+        sensitivity=("p", lambda s: (s >= THR_LAB).mean()),
+    )
+    for outcome in ["diabetes_diagnosed", "diabetes_total"]
+})
+"""),
+    md("""
+Among NHANES diabetics with fasting glucose < 126, the median predicted risk is **0%** and only about a third are caught. Above 126, more than 90% are caught. The model is not wrong about HbA1c. It has learned a rule that holds only in the synthetic data.
+
+### Benchmark: is the model better than a single lab test?
+"""),
+    code("""
+benchmarks = pd.DataFrame({
+    outcome: {
+        "Full model (Kaggle-trained)": roc_auc_score(lab[outcome], p_lab),
+        "HbA1c alone": roc_auc_score(lab[outcome], lab["HbA1c_level"]),
+        "Fasting glucose alone": roc_auc_score(lab[outcome], lab["blood_glucose_level"]),
+    } for outcome in ["diabetes_diagnosed", "diabetes_total"]
+})
+benchmarks.round(3)
+"""),
+    md("""
+**This is the most important result of the project.** On real patients, **HbA1c alone (AUC ≈ 0.93) beats the Kaggle-trained model (≈ 0.86–0.89)**. Training on synthetic data with built-in thresholds made the model *worse* than the single test it learned from. Without external validation, the 0.98 Kaggle AUC would have hidden this.
+
+Treated patients, by contrast, are *not* the problem: diagnosed patients on medication are caught more often than untreated ones, because they tend to have higher recorded glucose.
+"""),
+    code("""
+diag = lab_scored[lab_scored["diabetes_diagnosed"] == 1]
+treat = diag.groupby("on_diabetes_medication").agg(
+    patients=("p", "size"),
+    median_HbA1c=("HbA1c_level", "median"),
+    median_glucose=("blood_glucose_level", "median"),
+    sensitivity=("p", lambda s: (s >= THR_LAB).mean()),
+).rename(index={0: "not on medication", 1: "on insulin / tablets"})
+treat
+"""),
+    md("""
+## 4. Calibration and risk groups
+"""),
+    code("""
+fig = plot_calibration({"Total (ADA)": p_lab}, lab["diabetes_total"])
+ax = fig.axes[0]
+from sklearn.calibration import calibration_curve
+fp, mp = calibration_curve(lab["diabetes_diagnosed"], p_lab, n_bins=10, strategy="quantile")
+ax.plot(mp, fp, "s-", label="Diagnosed")
+ax.legend(loc="upper left", fontsize=9)
+ax.set_title("Calibration on NHANES (full model)")
+save_fig(fig, FIGURES_DIR / "external_calibration.png");
+"""),
+    code("""
+risk_nhanes = risk_group_table(lab["diabetes_total"], p_lab, CUTOFFS)
+risk_nhanes
+"""),
+    md("""
+The probabilities **do not transfer**. The model's mean predicted risk is 12% against an observed total prevalence of 19%. Its "Low" group (predicted ≈ 0%) still contains about 5% diabetics, roughly a fifth of all cases. These are mostly the glucose < 126 patients described above. The "Moderate" group is far riskier than predicted.
+
+The **ordering** of the groups is preserved (Low < Moderate < High), but the absolute probabilities and cut-offs would need recalibrating on local data before any use.
+
+## 5. Lab-free model (the screening question)
+
+The lab-free model needs only age, BMI, gender, hypertension, heart disease and smoking. It answers *"who should be sent for a blood test?"*, so it is evaluated on all adults with those fields.
+"""),
+    code("""
+p_nolab = no_lab_model.predict_proba(no_lab[NOLAB_FEATURES])[:, 1]
+nolab_results = pd.DataFrame({
+    "Kaggle test (reference)": pd.Series(summary["test_metrics_no_lab"]),
+    "NHANES: diagnosed": evaluate(no_lab["diabetes_diagnosed"], p_nolab, THR_NOLAB, no_lab["weight_exam"]),
+    "NHANES: total (ADA)": evaluate(no_lab["diabetes_total"], p_nolab, THR_NOLAB, no_lab["weight_exam"]),
+}).reindex(KEYS)
+nolab_results
+"""),
+    code("""
+fig, ax = plt.subplots(figsize=(6, 5.5))
+for label, y, p in [("NHANES diagnosed", no_lab["diabetes_diagnosed"], p_nolab),
+                    ("NHANES total (ADA)", no_lab["diabetes_total"], p_nolab)]:
+    fpr, tpr, _ = roc_curve(y, p)
+    ax.plot(fpr, tpr, label=f"{label} (AUC={roc_auc_score(y, p):.3f})")
+ax.plot([0, 1], [0, 1], "--", color="grey", lw=1)
+ax.set(xlabel="False positive rate", ylabel="Sensitivity",
+       title=f"Lab-free model on NHANES (Kaggle test AUC={summary['test_metrics_no_lab']['roc_auc']:.3f})")
+ax.legend(loc="lower right")
+fig.tight_layout()
+save_fig(fig, FIGURES_DIR / "external_no_lab_roc.png");
+"""),
+    md("""
+The lab-free model drops more modestly, from **0.83 on Kaggle to 0.78 on NHANES** (0.80 survey-weighted). Age, BMI, hypertension and heart disease are real-world risk factors with no synthetic cut-offs, so this signal **transfers better** than the lab-based rules.
+
+Because NHANES adults are older and more often hypertensive, the Kaggle-tuned threshold flags most people (sensitivity 95%, specificity about 33%). The threshold would need re-tuning for a real screening programme.
+
+## 6. Summary
+"""),
+    code("""
+external = {
+    "nhanes_cycle": "2021-2023",
+    "cohort_sizes": {"lab": len(lab), "no_lab": len(no_lab)},
+    "full_model": lab_results.drop(columns="Kaggle test (reference)").round(4).to_dict(),
+    "no_lab_model": nolab_results.drop(columns="Kaggle test (reference)").round(4).to_dict(),
+    "sensitivity_by_treatment_diagnosed": treat["sensitivity"].round(4).to_dict(),
+    "auc_benchmarks": benchmarks.round(4).to_dict(),
+}
+(REPORTS_DIR / "metrics_nhanes.json").write_text(json.dumps(external, indent=2, default=float))
+pd.DataFrame({
+    "Full model — diagnosed": lab_results["NHANES: diagnosed"],
+    "Full model — total (ADA)": lab_results["NHANES: total (ADA)"],
+    "Lab-free — diagnosed": nolab_results["NHANES: diagnosed"],
+    "Lab-free — total (ADA)": nolab_results["NHANES: total (ADA)"],
+}).loc[["roc_auc", "roc_auc_weighted", "pr_auc", "sensitivity", "specificity"]].round(3)
+"""),
+    md("""
+**Conclusions**
+
+1. **Ranking partly transfers.** The full model keeps good discrimination on real US data (AUC 0.86–0.89), but well below its Kaggle score (0.98).
+2. **The Kaggle model learned a synthetic artefact.** In Kaggle no diabetic has glucose < 126, so the model treats it as a hard rule. On NHANES this makes it miss about two thirds of diabetics below that level, and **HbA1c alone (AUC ≈ 0.93) outperforms it**.
+3. **Calibration and thresholds do not transfer.** Predicted risks are too low on NHANES and would need recalibrating locally.
+4. **The lab-free model generalises best** (AUC 0.83 → 0.78), because it relies on genuine risk factors rather than synthetic thresholds.
+5. **Next step:** train on real data such as NHANES itself (pooling several cycles), with the Kaggle data used, if at all, only for pre-training or comparison.
+
+**Caveats:** survey-weighted AUCs are reported alongside unweighted ones, but no full design-based variance estimation was done. NHANES fasting glucose and the Kaggle glucose measure are not identical. The data are cross-sectional.
+"""),
+])

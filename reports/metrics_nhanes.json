@@ -1,0 +1,71 @@
+{
+  "nhanes_cycle": "2021-2023",
+  "cohort_sizes": {
+    "lab": 3158,
+    "no_lab": 5943
+  },
+  "full_model": {
+    "NHANES: diagnosed": {
+      "roc_auc": 0.8585,
+      "roc_auc_weighted": 0.8802,
+      "pr_auc": 0.6411,
+      "brier": 0.0674,
+      "sensitivity": 0.7356,
+      "specificity": 0.9398,
+      "precision": 0.6612,
+      "observed_prevalence": 0.1377,
+      "mean_predicted": 0.1175
+    },
+    "NHANES: total (ADA)": {
+      "roc_auc": 0.8906,
+      "roc_auc_weighted": 0.9055,
+      "pr_auc": 0.8189,
+      "brier": 0.071,
+      "sensitivity": 0.7365,
+      "specificity": 0.9867,
+      "precision": 0.9298,
+      "observed_prevalence": 0.1935,
+      "mean_predicted": 0.1175
+    }
+  },
+  "no_lab_model": {
+    "NHANES: diagnosed": {
+      "roc_auc": 0.7751,
+      "roc_auc_weighted": 0.7986,
+      "pr_auc": 0.328,
+      "brier": 0.109,
+      "sensitivity": 0.952,
+      "specificity": 0.3249,
+      "precision": 0.1871,
+      "observed_prevalence": 0.1403,
+      "mean_predicted": 0.1774
+    },
+    "NHANES: total (ADA)": {
+      "roc_auc": 0.7782,
+      "roc_auc_weighted": 0.8022,
+      "pr_auc": 0.4014,
+      "brier": 0.1258,
+      "sensitivity": 0.9512,
+      "specificity": 0.3378,
+      "precision": 0.2387,
+      "observed_prevalence": 0.1792,
+      "mean_predicted": 0.1774
+    }
+  },
+  "sensitivity_by_treatment_diagnosed": {
+    "not on medication": 0.3898,
+    "on insulin / tablets": 0.7899
+  },
+  "auc_benchmarks": {
+    "diabetes_diagnosed": {
+      "Full model (Kaggle-trained)": 0.8585,
+      "HbA1c alone": 0.9289,
+      "Fasting glucose alone": 0.8771
+    },
+    "diabetes_total": {
+      "Full model (Kaggle-trained)": 0.8906,
+      "HbA1c alone": 0.9402,
+      "Fasting glucose alone": 0.9192
+    }
+  }
+}
