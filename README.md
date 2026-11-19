@@ -275,15 +275,15 @@ Class weighting and SMOTE change ranking quality very little. Their main effect 
 
 ### Improvements over the original capstone
 
-| Original capstone                                           | This version                                                       |
-| ----------------------------------------------------------- | ------------------------------------------------------------------ |
-| Single train/test split; the test set informed model choice | Train / validation / test; the test set is used once               |
-| SMOTE applied manually before fitting                       | SMOTE inside an `imblearn` pipeline (no leakage)                   |
+| Original capstone                                           | This version                                                                                |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Single train/test split; the test set informed model choice | Train / validation / test; the test set is used once                                        |
+| SMOTE applied manually before fitting                       | SMOTE inside an `imblearn` pipeline (no leakage)                                            |
 | Accuracy-led comparison at a 0.5 threshold                  | PR-AUC, Brier score, calibration, a clinically chosen threshold and decision curve analysis |
-| LR vs RF                                                    | LR, RF and Gradient Boosting × 3 imbalance strategies + baseline   |
-| Feature importance only                                     | SHAP (global and local), permutation importance, subgroup analysis |
-| Evaluated on one dataset only                               | External validation on real NHANES patients                        |
-| Single notebook                                             | Modular `src/` package, 5 notebooks, unit tests, CI                |
+| LR vs RF                                                    | LR, RF and Gradient Boosting × 3 imbalance strategies + baseline                            |
+| Feature importance only                                     | SHAP (global and local), permutation importance, subgroup analysis                          |
+| Evaluated on one dataset only                               | External validation on real NHANES patients                                                 |
+| Single notebook                                             | Modular `src/` package, 5 notebooks, unit tests, CI                                         |
 
 ---
 
@@ -405,4 +405,4 @@ The code in this repository is released under the [MIT License](LICENSE). The da
 
 ---
 
-**Author:** _Adebanjo Mary_ · [LinkedIn](https://www.linkedin.com/in/adebanjo-abolanle-mary) · [GitHub](https://github.com/kaempy)
+**Author:** _Adebanjo Mary_ · [LinkedIn](https://www.linkedin.com/in/abolanle-mary-adebanjo) · [GitHub](https://github.com/kaempy)
