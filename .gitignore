@@ -1,0 +1,26 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Environment variables
+.env
+
+# Data (download instructions in data/README.md)
+data/raw/*
+!data/raw/.gitkeep
+
+# Trained model artefacts (regenerate with notebook 03)
+models/
