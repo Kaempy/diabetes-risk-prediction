@@ -506,7 +506,39 @@ save_fig(fig, FIGURES_DIR / "test_ablation_no_lab.png");
     md("""
 Without lab values, discrimination drops substantially but remains well above chance, driven by age, BMI, hypertension and heart disease. To reach 90% sensitivity the lab-free model must flag many more patients — consistent with its role as a cheap **pre-screen** that decides who gets a blood test, after which the full model applies.
 
-## 7. Save artefacts
+## 7. Decision curve analysis
+
+ROC-AUC tells us how well the model **ranks** patients, not whether using it leads to **better decisions**. Decision curve analysis (Vickers & Elkin, 2006) answers that question. For each *threshold probability* p<sub>t</sub> (the risk at which a clinician would order a confirmatory test), it computes the model's **net benefit**:
+
+$$\\text{NB} = \\frac{TP}{n} - \\frac{FP}{n} \\cdot \\frac{p_t}{1 - p_t}$$
+
+The weight p<sub>t</sub>/(1−p<sub>t</sub>) says how many false positives one true positive is worth. For example, p<sub>t</sub> = 10% means you would accept 9 unnecessary tests to find one case. A strategy is only useful where its net benefit is higher than both **treat all** (test everyone) and **treat none** (test no one).
+
+The model is compared against those two defaults, the lab-free model, and a simple clinical rule: **test positive if HbA1c ≥ 6.5%**.
+"""),
+    code("""
+from src.evaluation import decision_curve, plot_decision_curve
+
+dca_test = decision_curve(y_test, {
+    f"{best_name} (calibrated)": p_test,
+    "Lab-free model": p_test_nolab,
+    "HbA1c ≥ 6.5% rule": (X_test["HbA1c_level"] >= 6.5).to_numpy(),
+})
+fig = plot_decision_curve(dca_test, "Decision curve — Kaggle test set", mark=thr_screen)
+save_fig(fig, FIGURES_DIR / "test_decision_curve.png")
+dca_test.to_csv(REPORTS_DIR / "decision_curve_test.csv")
+dca_test.loc[[0.02, 0.05, 0.10, 0.13, 0.20, 0.30]].round(4)
+"""),
+    md("""
+**Reading the curve**
+
+* **The full model gives the most net benefit at every threshold from 1% to 50%.** At the screening threshold (≈ 13%) its net benefit is about **0.068**. That is like finding 6.8 true cases per 100 patients with no false alarms, out of 8.8 possible, and roughly **double the HbA1c ≥ 6.5% rule (0.033)**.
+* **Treat all** only helps when tests are almost free (p<sub>t</sub> below about 8%) and becomes harmful after that.
+* The **lab-free model** beats treat-all at every threshold, and beats the HbA1c rule below about 12%. It is a sensible way to decide who gets a blood test when tests are cheap.
+
+These are Kaggle results. Notebook 05 repeats the analysis on real NHANES patients.
+
+## 8. Save artefacts
 """),
     code("""
 MODELS_DIR.mkdir(exist_ok=True)
