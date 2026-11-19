@@ -6,7 +6,7 @@ The project goes beyond a single accuracy number: it compares models and class-i
 
 Finally, the models are **externally validated on real patients from NHANES 2021–2023 (CDC)**. That test shows how much of the Kaggle performance survives in real-world data, and exposes a synthetic-data artefact that a single-dataset evaluation would have hidden.
 
-> Portfolio project, developed from a She Code Africa Data Science capstone (Group 1) and extended into a reproducible, tested ML workflow.
+> Portfolio project, developed from a She Code Africa Data Science capstone project and extended into a reproducible, tested ML workflow.
 
 ---
 
