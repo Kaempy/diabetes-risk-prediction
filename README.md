@@ -25,6 +25,7 @@ Finally, the models are **externally validated on real patients from NHANES 2021
 - [Limitations](#limitations)
 - [Future Work](#future-work)
 - [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ---
 
@@ -395,6 +396,12 @@ Datasets:
 
 - Mohammed Mustafa, _Diabetes Prediction Dataset_, Kaggle.
 - Centers for Disease Control and Prevention, National Center for Health Statistics. _National Health and Nutrition Examination Survey 2021–2023_. U.S. Department of Health and Human Services.
+
+---
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE). The datasets are not covered by this licence: the Kaggle dataset is subject to its own terms on Kaggle, and NHANES data are public domain (CDC / NCHS).
 
 ---
 
